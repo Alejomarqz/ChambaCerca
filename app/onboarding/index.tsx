@@ -31,23 +31,19 @@ export default function OnboardingIntro() {
       <StatusBar barStyle="dark-content" />
 
       <View style={styles.inner}>
-        {/* Imagen */}
         <Image
           source={require("../../assets/images/fox.png")}
           style={styles.image}
           resizeMode="contain"
         />
 
-        {/* Título */}
         <Text style={styles.title}>Chamba Cerca</Text>
 
-        {/* TEXTO PRINCIPAL – claro para Guatemala */}
         <Text style={styles.subtitle}>
           Conectamos personas que buscan trabajo con quienes necesitan a alguien
           que les ayude, cerca de su zona. Trato directo y sin intermediarios.
         </Text>
 
-        {/* BLOQUE DE PUNTOS */}
         <View style={styles.featuresCard}>
           <Feature
             icon="search-outline"
@@ -68,9 +64,8 @@ export default function OnboardingIntro() {
           />
         </View>
 
-        {/* CTA */}
         <Pressable
-          onPress={() => router.push("/register")}
+          onPress={() => router.push("/onboarding/login")}
           onPressIn={() => setPressed(true)}
           onPressOut={() => setPressed(false)}
           style={[styles.button, pressed && styles.buttonPressed]}
@@ -78,12 +73,11 @@ export default function OnboardingIntro() {
           <Text style={styles.buttonText}>Comenzar</Text>
         </Pressable>
 
-        {/* Micro-copy */}
         <Text style={styles.trust}>Personas reales · Trato directo · Local</Text>
 
-        {/* Link secundario */}
+        {/* Mejor UX: replace para no volver al onboarding con "back" */}
         <Pressable
-          onPress={() => router.push("/explore")}
+          onPress={() => router.replace("/(tabs)")}
           style={({ pressed }) => [styles.linkWrap, pressed && { opacity: 0.75 }]}
           hitSlop={10}
         >
@@ -99,7 +93,7 @@ function Feature({
   title,
   subtitle,
 }: {
-  icon: any;
+  icon: keyof typeof Ionicons.glyphMap;
   title: string;
   subtitle: string;
 }) {

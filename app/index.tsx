@@ -1,13 +1,15 @@
+// app/index.tsx
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import React, { useEffect, useRef } from "react";
 import {
-    ActivityIndicator,
-    Animated,
-    Dimensions,
-    Image,
-    StatusBar,
-    StyleSheet,
-    View,
+  ActivityIndicator,
+  Animated,
+  Dimensions,
+  Image,
+  StatusBar,
+  StyleSheet,
+  View,
 } from "react-native";
 
 const { width } = Dimensions.get("window");
@@ -20,7 +22,7 @@ export default function SplashScreen() {
   const opacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    Animated.parallel([
+    const anim = Animated.parallel([
       Animated.timing(opacity, {
         toValue: 1,
         duration: 400,
@@ -40,13 +42,45 @@ export default function SplashScreen() {
           }),
         ])
       ),
-    ]).start();
+    ]);
 
-    const t = setTimeout(() => {
-      router.replace("/onboarding");
-    }, 2600);
+    anim.start();
 
-    return () => clearTimeout(t);
+    const t = setTimeout(async () => {
+      try {
+        const session = await AsyncStorage.getItem("chamba_session"); // ✅ NUEVO
+        const onboarded = await AsyncStorage.getItem("chamba_onboarded");
+        const role = await AsyncStorage.getItem("chamba_role");
+
+        // ✅ 1) Si NO hay sesión -> Login (primero siempre)
+        if (session !== "1") {
+          router.replace("/onboarding/login");
+          return;
+        }
+
+        // ✅ 2) Si hay sesión pero NO terminó onboarding -> onboarding
+        if (onboarded !== "1") {
+          router.replace("/onboarding");
+          return;
+        }
+
+        // ✅ 3) Si hay sesión + onboarding + rol -> Tabs
+        if (role === "worker" || role === "seeker") {
+          router.replace("/(tabs)");
+          return;
+        }
+
+        // ✅ 4) fallback
+        router.replace("/onboarding");
+      } catch {
+        router.replace("/onboarding/login");
+      }
+    }, 1400);
+
+    return () => {
+      clearTimeout(t);
+      anim.stop();
+    };
   }, [router, opacity, scale]);
 
   return (

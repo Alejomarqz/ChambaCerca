@@ -5,3 +5,244 @@ $env:JAVA_HOME
 java -version
 
 npx expo run:android
+.
+
+
+
+
+
+
+
+import Ionicons from "@expo/vector-icons/Ionicons";
+import { useRouter } from "expo-router";
+import React, { useState } from "react";
+import {
+    Dimensions,
+    Image,
+    Platform,
+    Pressable,
+    StatusBar,
+    StyleSheet,
+    Text,
+    View,
+} from "react-native";
+
+const { width, height } = Dimensions.get("window");
+
+const ORANGE = "#ea691e";
+const TEXT = "#0B1220";
+const MUTED = "#4F5D73";
+const CARD_BG = "#F7F8FC";
+const CARD_BORDER = "#E7ECF5";
+
+const IMAGE_SIZE = Math.min(width * 0.78, 340);
+
+export default function OnboardingIntro() {
+  const router = useRouter();
+  const [pressed, setPressed] = useState(false);
+
+  return (
+    <View style={styles.container}>
+      <StatusBar barStyle="dark-content" />
+
+      <View style={styles.inner}>
+        <Image
+          source={require("../../assets/images/fox.png")}
+          style={styles.image}
+          resizeMode="contain"
+        />
+
+        <Text style={styles.title}>Chamba Cerca</Text>
+
+        <Text style={styles.subtitle}>
+          Conectamos personas que buscan trabajo con quienes necesitan a alguien
+          que les ayude, cerca de su zona. Trato directo y sin intermediarios.
+        </Text>
+
+        <View style={styles.featuresCard}>
+          <Feature
+            icon="search-outline"
+            title="Encuentra trabajo"
+            subtitle="Personas de tu zona que necesitan lo que tú sabes hacer"
+          />
+          <View style={styles.divider} />
+          <Feature
+            icon="person-add-outline"
+            title="Crea tu perfil"
+            subtitle="Di qué haces y permite que te contacten cuando lo necesiten"
+          />
+          <View style={styles.divider} />
+          <Feature
+            icon="people-outline"
+            title="Trato directo"
+            subtitle="Sin intermediarios ni comisiones"
+          />
+        </View>
+
+        <Pressable
+          onPress={() => router.push("/onboarding/basic-profile")}
+          onPressIn={() => setPressed(true)}
+          onPressOut={() => setPressed(false)}
+          style={[styles.button, pressed && styles.buttonPressed]}
+        >
+          <Text style={styles.buttonText}>Comenzar</Text>
+        </Pressable>
+
+        <Text style={styles.trust}>Personas reales · Trato directo · Local</Text>
+
+        {/* Mejor UX: replace para no volver al onboarding con "back" */}
+        <Pressable
+          onPress={() => router.replace("/(tabs)")}
+          style={({ pressed }) => [styles.linkWrap, pressed && { opacity: 0.75 }]}
+          hitSlop={10}
+        >
+          <Text style={styles.linkText}>Ver personas disponibles</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function Feature({
+  icon,
+  title,
+  subtitle,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  subtitle: string;
+}) {
+  return (
+    <View style={styles.featureRow}>
+      <View style={styles.iconWrap}>
+        <Ionicons name={icon} size={20} color={ORANGE} />
+      </View>
+
+      <View style={{ flex: 1 }}>
+        <Text style={styles.featureTitle}>{title}</Text>
+        <Text style={styles.featureSubtitle}>{subtitle}</Text>
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#FFFFFF" },
+
+  inner: {
+    flex: 1,
+    paddingHorizontal: 22,
+    paddingTop: Platform.OS === "android" ? 10 : 24,
+    paddingBottom: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  image: {
+    width: IMAGE_SIZE,
+    height: Math.min(height * 0.28, 270),
+    marginBottom: 6,
+  },
+
+  title: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 25,
+    color: TEXT,
+    marginBottom: 8,
+  },
+
+  subtitle: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 14.6,
+    lineHeight: 21,
+    color: MUTED,
+    textAlign: "center",
+    maxWidth: 330,
+    marginBottom: 14,
+  },
+
+  featuresCard: {
+    width: "100%",
+    maxWidth: 380,
+    backgroundColor: CARD_BG,
+    borderWidth: 1,
+    borderColor: CARD_BORDER,
+    borderRadius: 18,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    marginBottom: 16,
+  },
+
+  divider: {
+    height: 1,
+    backgroundColor: CARD_BORDER,
+    marginLeft: 46,
+    marginVertical: 10,
+  },
+
+  featureRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 2,
+  },
+
+  iconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    backgroundColor: "rgba(234,105,30,0.10)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  featureTitle: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 13.5,
+    color: TEXT,
+    marginBottom: 1,
+  },
+
+  featureSubtitle: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12.5,
+    color: MUTED,
+  },
+
+  button: {
+    backgroundColor: ORANGE,
+    paddingVertical: 13,
+    paddingHorizontal: 34,
+    borderRadius: 14,
+    minWidth: 220,
+    alignItems: "center",
+    marginBottom: 8,
+  },
+
+  buttonPressed: {
+    backgroundColor: "#d95f1a",
+    transform: [{ scale: 0.985 }],
+  },
+
+  buttonText: {
+    fontFamily: "Poppins_600SemiBold",
+    color: "#FFFFFF",
+    fontSize: 14.5,
+  },
+
+  trust: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 11.5,
+    color: "#7C879B",
+    marginBottom: 10,
+  },
+
+  linkWrap: { marginTop: 0 },
+
+  linkText: {
+    fontFamily: "Poppins_500Medium",
+    fontSize: 13.5,
+    color: MUTED,
+    textDecorationLine: "underline",
+  },
+});
