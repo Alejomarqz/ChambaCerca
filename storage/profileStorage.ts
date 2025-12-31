@@ -10,10 +10,30 @@ export type Role = "worker" | "seeker";
 
 export type Availability = ("manana" | "tarde" | "noche" | "fin")[];
 
+/**
+ * ✅ BasicProfile ahora soporta ubicación ADMINISTRATIVA:
+ * - department + municipality (obligatorio)
+ * - sector/colonia (opcional)
+ *
+ * Nota: dejamos `zone` por compatibilidad (legacy), pero para el nuevo flujo
+ * lo ideal es usar department/municipality + sector.
+ */
 export type BasicProfile = {
   firstName: string;
   lastName: string;
+
+  // legacy / compat (antes era texto libre). Puedes usarlo como "zona vieja".
   zone: string;
+
+  // ✅ nuevos (obligatorios)
+  departmentId: string;
+  departmentName: string;
+  municipalityId: string;
+  municipalityName: string;
+
+  // ✅ opcional
+  sector: string;
+
   whatsapp: string;
   photoUri?: string;
 };
@@ -27,7 +47,7 @@ export type WorkerProfile = {
 export type SeekerProfile = {
   // lo mínimo para filtrar/buscar (puedes expandir luego)
   lookingFor: string; // oficio que busca
-  preferredZones: string[]; // zonas donde busca
+  preferredZones: string[]; // zonas donde busca (legacy/extra)
   availabilityNeeded: Availability; // horarios que le sirven
 };
 
@@ -46,7 +66,15 @@ export type Profile = {
   // index (para búsqueda rápida / consistencia)
   index: {
     fullName: string;
+
+    // legacy
     zoneNormalized: string;
+
+    // ✅ nuevos
+    departmentId: string;
+    municipalityId: string;
+    municipalityNormalized: string;
+
     workNormalized: string;
     lookingForNormalized: string;
   };
@@ -90,9 +118,18 @@ function norm(s: any) {
 
 function buildIndex(p: Profile) {
   const fullName = `${p.basic.firstName} ${p.basic.lastName}`.trim();
+
   return {
     fullName,
+
+    // legacy
     zoneNormalized: norm(p.basic.zone),
+
+    // ✅ nuevos
+    departmentId: p.basic.departmentId || "",
+    municipalityId: p.basic.municipalityId || "",
+    municipalityNormalized: norm(p.basic.municipalityName),
+
     workNormalized: norm(p.worker.work),
     lookingForNormalized: norm(p.seeker.lookingFor),
   };
@@ -101,6 +138,7 @@ function buildIndex(p: Profile) {
 /** ===== Defaults ===== */
 export function createEmptyProfile(role: Role = "worker"): Profile {
   const t = nowISO();
+
   const profile: Profile = {
     schemaVersion: 2,
     role,
@@ -108,7 +146,16 @@ export function createEmptyProfile(role: Role = "worker"): Profile {
     basic: {
       firstName: "",
       lastName: "",
+
       zone: "",
+
+      departmentId: "",
+      departmentName: "",
+      municipalityId: "",
+      municipalityName: "",
+
+      sector: "",
+
       whatsapp: "",
       photoUri: undefined,
     },
@@ -128,6 +175,11 @@ export function createEmptyProfile(role: Role = "worker"): Profile {
     index: {
       fullName: "",
       zoneNormalized: "",
+
+      departmentId: "",
+      municipalityId: "",
+      municipalityNormalized: "",
+
       workNormalized: "",
       lookingForNormalized: "",
     },
@@ -143,16 +195,22 @@ export function createEmptyProfile(role: Role = "worker"): Profile {
 /** ===== Completeness checks (según rol) ===== */
 export function isBasicComplete(p: Profile | null) {
   if (!p) return false;
+
   const fn = p.basic.firstName.trim();
   const ln = p.basic.lastName.trim();
-  const zone = p.basic.zone.trim();
   const wa = p.basic.whatsapp.trim();
-  return !!fn && !!ln && !!zone && !!wa;
+
+  // ✅ obligatorios
+  const dep = p.basic.departmentId.trim();
+  const mun = p.basic.municipalityId.trim();
+
+  return !!fn && !!ln && !!wa && !!dep && !!mun;
 }
 
 export function isWorkerComplete(p: Profile | null) {
   if (!p) return false;
   if (!isBasicComplete(p)) return false;
+
   const work = p.worker.work.trim();
   return !!work;
 }
@@ -160,6 +218,7 @@ export function isWorkerComplete(p: Profile | null) {
 export function isSeekerComplete(p: Profile | null) {
   if (!p) return false;
   if (!isBasicComplete(p)) return false;
+
   const lookingFor = p.seeker.lookingFor.trim();
   // zonas/availability pueden ser opcionales, pero oficio que busca normalmente sí
   return !!lookingFor;
@@ -256,10 +315,12 @@ export async function resetProfile() {
 
 /**
  * Migración: v1 (tu file actual) -> v2
- * v1 shape:
+ * v1 shape (aprox):
  * {
  *  role, firstName,lastName,zone,whatsapp,work,photoUri,isAvailable,updatedAt
  * }
+ *
+ * Nota: v1 NO tenía dept/muni. Los dejamos vacíos para que el usuario los complete.
  */
 async function migrateV1ToV2(): Promise<Profile | null> {
   const raw = await AsyncStorage.getItem(KEY_PROFILE_V1);
@@ -271,7 +332,17 @@ async function migrateV1ToV2(): Promise<Profile | null> {
 
   p.basic.firstName = String(v1.firstName ?? "");
   p.basic.lastName = String(v1.lastName ?? "");
+
+  // legacy (texto libre)
   p.basic.zone = String(v1.zone ?? "");
+
+  // ✅ nuevos quedan vacíos (deben completarse en UI)
+  p.basic.departmentId = "";
+  p.basic.departmentName = "";
+  p.basic.municipalityId = "";
+  p.basic.municipalityName = "";
+  p.basic.sector = "";
+
   p.basic.whatsapp = String(v1.whatsapp ?? "");
   p.basic.photoUri = v1.photoUri ? String(v1.photoUri) : undefined;
 
@@ -280,6 +351,7 @@ async function migrateV1ToV2(): Promise<Profile | null> {
 
   // seeker defaults (no existía)
   p.seeker.lookingFor = role === "seeker" ? String(v1.work ?? "") : "";
+
   p.createdAt = String(v1.updatedAt ?? nowISO());
   p.updatedAt = nowISO();
   p.index = buildIndex(p);
@@ -290,6 +362,8 @@ async function migrateV1ToV2(): Promise<Profile | null> {
 
 /**
  * Migración: legacy (basic-profile + seeker-worker-profile + worker_available + chamba_role) -> v2
+ *
+ * Nota: legacy tampoco tenía dept/muni. Los dejamos vacíos para completar en UI.
  */
 async function migrateLegacyToV2(): Promise<Profile | null> {
   const roleRaw = await AsyncStorage.getItem(KEY_ROLE);
@@ -321,7 +395,17 @@ async function migrateLegacyToV2(): Promise<Profile | null> {
   const p = createEmptyProfile(role);
   p.basic.firstName = firstName;
   p.basic.lastName = lastName;
+
+  // legacy
   p.basic.zone = zone;
+
+  // ✅ nuevos vacíos
+  p.basic.departmentId = "";
+  p.basic.departmentName = "";
+  p.basic.municipalityId = "";
+  p.basic.municipalityName = "";
+  p.basic.sector = "";
+
   p.basic.whatsapp = whatsapp;
 
   p.worker.work = work;
