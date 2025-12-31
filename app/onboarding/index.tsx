@@ -1,7 +1,10 @@
+// app/onboarding/index.tsx
 import Ionicons from "@expo/vector-icons/Ionicons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
+  ActivityIndicator,
   Dimensions,
   Image,
   Platform,
@@ -11,6 +14,8 @@ import {
   Text,
   View,
 } from "react-native";
+
+import { getBootFlags } from "../../storage/pinStorage";
 
 const { width, height } = Dimensions.get("window");
 
@@ -22,9 +27,53 @@ const CARD_BORDER = "#E7ECF5";
 
 const IMAGE_SIZE = Math.min(width * 0.78, 340);
 
+// Keys
+const KEY_ONBOARDED = "chamba_onboarded"; // "1"
+
 export default function OnboardingIntro() {
   const router = useRouter();
   const [pressed, setPressed] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const handleStart = async () => {
+    if (loading) return;
+    setLoading(true);
+    try {
+      // ✅ Marcamos que ya vio onboarding (para que app/index no lo regrese aquí)
+      await AsyncStorage.setItem(KEY_ONBOARDED, "1");
+
+      const boot = await getBootFlags();
+
+      // ✅ Si ya tiene sesión (cuenta creada / login) -> PIN obligatorio
+      if (boot.session) {
+        router.replace("/onboarding/pin-suggest");
+        return;
+      }
+
+      // ✅ Si no hay sesión -> login
+      router.replace("/onboarding/login");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleBrowse = async () => {
+    if (loading) return;
+    setLoading(true);
+    try {
+      const boot = await getBootFlags();
+
+      // Si ya hay sesión pero no hay PIN, no dejamos saltarse el PIN
+      if (boot.session && !boot.pinEnabled) {
+        router.replace("/onboarding/pin-suggest");
+        return;
+      }
+
+      router.replace("/(tabs)");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <View style={styles.container}>
@@ -65,21 +114,26 @@ export default function OnboardingIntro() {
         </View>
 
         <Pressable
-          onPress={() => router.push("/onboarding/login")}
+          onPress={handleStart}
           onPressIn={() => setPressed(true)}
           onPressOut={() => setPressed(false)}
-          style={[styles.button, pressed && styles.buttonPressed]}
+          style={[styles.button, pressed && styles.buttonPressed, loading && { opacity: 0.85 }]}
+          disabled={loading}
         >
-          <Text style={styles.buttonText}>Comenzar</Text>
+          {loading ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.buttonText}>Comenzar</Text>
+          )}
         </Pressable>
 
         <Text style={styles.trust}>Personas reales · Trato directo · Local</Text>
 
-        {/* Mejor UX: replace para no volver al onboarding con "back" */}
         <Pressable
-          onPress={() => router.replace("/(tabs)")}
+          onPress={handleBrowse}
           style={({ pressed }) => [styles.linkWrap, pressed && { opacity: 0.75 }]}
           hitSlop={10}
+          disabled={loading}
         >
           <Text style={styles.linkText}>Ver personas disponibles</Text>
         </Pressable>

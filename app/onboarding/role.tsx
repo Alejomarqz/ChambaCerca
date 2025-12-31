@@ -15,6 +15,9 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { setCheckpoint } from "../../storage/bootStorage";
+import { setRole } from "../../storage/profileStorage";
+
 const { width, height } = Dimensions.get("window");
 
 const ORANGE = "#ea691e";
@@ -87,14 +90,18 @@ export default function RoleScreen() {
 
   const pickRole = async (role: Role) => {
     try {
-      // ✅ Sesión + rol + onboarding
       await AsyncStorage.setItem("chamba_session", "1");
-      await AsyncStorage.setItem("chamba_role", role);
       await AsyncStorage.setItem("chamba_onboarded", "1");
 
-      router.replace("/(tabs)");
+      await setRole(role);
+      await AsyncStorage.setItem("chamba_role", role);
+
+      // ✅ checkpoint: rol elegido
+      await setCheckpoint("role_done");
+
+      router.replace(role === "worker" ? "/onboarding/worker-form" : "/onboarding/seeker-form");
     } catch (e) {
-      router.replace("/(tabs)");
+      router.replace(role === "worker" ? "/onboarding/worker-form" : "/onboarding/seeker-form");
     }
   };
 
@@ -136,15 +143,6 @@ export default function RoleScreen() {
         </View>
 
         <View style={styles.footer}>
-          <Pressable
-            onPress={() => router.back()}
-            style={({ pressed }) => [styles.backBtn, pressed && { opacity: 0.85 }]}
-            hitSlop={10}
-          >
-            <Ionicons name="arrow-back" size={18} color={TEXT} />
-            <Text style={styles.backText}>Regresar</Text>
-          </Pressable>
-
           <Text style={styles.microcopy}>Personas reales · Trato directo · Local</Text>
         </View>
       </View>
@@ -285,24 +283,6 @@ const styles = StyleSheet.create({
   footer: {
     alignItems: "center",
     paddingTop: 8,
-  },
-
-  backBtn: {
-    flexDirection: "row",
-    gap: 8,
-    alignItems: "center",
-    backgroundColor: "rgba(11,18,32,0.05)",
-    borderWidth: 1,
-    borderColor: "rgba(11,18,32,0.08)",
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 14,
-  },
-
-  backText: {
-    fontFamily: "Poppins_500Medium",
-    fontSize: 13,
-    color: TEXT,
   },
 
   microcopy: {

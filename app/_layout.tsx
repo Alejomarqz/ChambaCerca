@@ -6,11 +6,13 @@ import {
   Poppins_700Bold,
   useFonts,
 } from "@expo-google-fonts/poppins";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import { useEffect } from "react";
-import { AppState } from "react-native";
+import { useEffect, useRef } from "react";
+import { AppState, AppStateStatus } from "react-native";
+
+// ✅ pinStorage con timeout inteligente
+import { lockIfTimedOut, markBackgrounded } from "../storage/pinStorage";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -25,25 +27,45 @@ export default function RootLayout() {
   });
 
   useEffect(() => {
-    // Si cargaron o fallaron, quitamos el splash nativo
     if (fontsLoaded || fontError) {
       SplashScreen.hideAsync().catch(() => {});
     }
   }, [fontsLoaded, fontError]);
 
-  // ✅ Cerrar sesión al salir de la app (background/inactive)
+  // Guardamos el estado previo para detectar transición a "active"
+  const lastState = useRef<AppStateStatus>(AppState.currentState);
+
   useEffect(() => {
-    const sub = AppState.addEventListener("change", async (state) => {
-      if (state === "background" || state === "inactive") {
-        await AsyncStorage.removeItem("chamba_session");
+    const sub = AppState.addEventListener("change", (nextState) => {
+      const prev = lastState.current;
+      lastState.current = nextState;
+
+      // ✅ Cuando se va a background/inactive: SOLO marcar tiempo (no bloquear ya)
+      if (nextState === "background" || nextState === "inactive") {
+        markBackgrounded().catch(() => {});
+        return;
+      }
+
+      // ✅ Cuando vuelve a active desde background/inactive: bloquear si ya pasó el tiempo
+      if (
+        nextState === "active" &&
+        (prev === "background" || prev === "inactive")
+      ) {
+        lockIfTimedOut().catch(() => {});
       }
     });
 
     return () => sub.remove();
   }, []);
 
-  // Mientras no estén listas las fuentes (y no haya error), no renderizamos nada
   if (!fontsLoaded && !fontError) return null;
 
-  return <Stack screenOptions={{ headerShown: false, animation: "fade" }} />;
+  return (
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        animation: "fade",
+      }}
+    />
+  );
 }

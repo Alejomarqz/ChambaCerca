@@ -18,6 +18,9 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+// ✅ Storage PRO (v2)
+import { setRole, upsertBasic, upsertSeeker } from "../../storage/profileStorage";
+
 const { width } = Dimensions.get("window");
 
 const ORANGE = "#ea691e";
@@ -29,78 +32,53 @@ const CARD_BORDER = "#E7ECF5";
 
 const MAX_W = Math.min(420, width - 44);
 
-type AvailabilityKey = "manana" | "tarde" | "noche" | "fin";
-
-type ChipProps = {
-  label: string;
-  active: boolean;
-  onPress: () => void;
-};
-
-// ✅ KEYS que el Home lee
-const KEY_WORKER = "seeker-worker-profile";
+// ✅ Legacy keys (por si algo viejo lo lee)
 const KEY_ROLE = "chamba_role";
 
 export default function SeekerForm() {
   const router = useRouter();
 
-  const [trade, setTrade] = useState<string>("");
-  const [availability, setAvailability] = useState<AvailabilityKey[]>(["manana"]);
+  const [need, setNeed] = useState<string>("");
+  const [zone, setZone] = useState<string>("");
 
-  const canSubmit = useMemo(() => trade.trim().length >= 2, [trade]);
-
-  const toggle = (k: AvailabilityKey) => {
-    setAvailability((prev) => {
-      const next = prev.includes(k) ? prev.filter((x) => x !== k) : [...prev, k];
-      return next.length ? next : ["manana"]; // nunca queda vacío
-    });
-  };
-
-  const prettyAvail = (arr: AvailabilityKey[]) => {
-    const map: Record<AvailabilityKey, string> = {
-      manana: "Mañana",
-      tarde: "Tarde",
-      noche: "Noche",
-      fin: "Fin de semana",
-    };
-    return arr.map((k) => map[k]).join(", ");
-  };
+  const canSubmit = useMemo(() => {
+    return need.trim().length >= 2 && zone.trim().length >= 2;
+  }, [need, zone]);
 
   const onSubmit = async () => {
     if (!canSubmit) {
-      Alert.alert("Completa tu oficio", "Escribe qué oficio haces.");
+      Alert.alert("Completa los datos", "Escribe qué necesitas y tu zona.");
       return;
     }
 
-    const oficio = trade.trim();
-
-    const payload = {
-      work: oficio, // ✅ IMPORTANTE: Home busca worker.work/oficio/job
-      trade_raw: oficio,
-      availability,
-      updatedAt: new Date().toISOString(),
-    };
-
-    console.log("[seeker-worker-profile]", payload);
+    const lookingFor = need.trim();
+    const zoneTxt = zone.trim();
 
     try {
-      // ✅ 1) Guardar oficio + disponibilidad en el key que Home lee
-      await AsyncStorage.setItem(KEY_WORKER, JSON.stringify(payload));
+      // ✅ 1) Guardar rol seeker (nuevo + legacy)
+      await setRole("seeker");
+      await AsyncStorage.setItem(KEY_ROLE, "seeker");
 
-      // ✅ 2) Asegurar rol worker (este form es para quien busca trabajo)
-      await AsyncStorage.setItem(KEY_ROLE, "worker");
+      // ✅ 2) Guardar zona (básico) en storage pro
+      // Nota: whatsapp se llena después en perfil/home si lo agregás
+      await upsertBasic({ zone: zoneTxt });
 
-      // ✅ 3) Ir al Home (tabs) para ver el perfil ya con oficio
+      // ✅ 3) Guardar lo que busca en storage pro
+      await upsertSeeker({
+        lookingFor,
+        preferredZones: [zoneTxt], // por ahora usamos una sola zona
+        availabilityNeeded: [], // no lo estás pidiendo en UI todavía
+      });
+
+      // ✅ 4) Ir a tabs (después podremos mandar a resultados)
       router.replace("/(tabs)");
     } catch (e) {
       console.log("[seeker-form-save-error]", e);
-      Alert.alert("Error", "No se pudo guardar tu oficio. Intenta de nuevo.");
+      Alert.alert("Error", "No se pudo guardar tu búsqueda. Intenta de nuevo.");
     }
   };
 
-  const primaryLabel = canSubmit
-    ? "Guardar y continuar"
-    : "Completa el oficio para continuar";
+  const primaryLabel = canSubmit ? "Buscar perfiles" : "Completa los datos para buscar";
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -111,20 +89,14 @@ export default function SeekerForm() {
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         <ScrollView
-          contentContainerStyle={[
-            styles.content,
-            { flexGrow: 1, justifyContent: "center" },
-          ]}
+          contentContainerStyle={[styles.content, { flexGrow: 1, justifyContent: "center" }]}
           keyboardShouldPersistTaps="handled"
         >
           {/* Top bar */}
           <View style={styles.topRow}>
             <Pressable
               onPress={() => router.back()}
-              style={({ pressed }) => [
-                styles.backChip,
-                pressed && { opacity: 0.85 },
-              ]}
+              style={({ pressed }) => [styles.backChip, pressed && { opacity: 0.85 }]}
               hitSlop={10}
             >
               <Ionicons name="arrow-back" size={18} color={TEXT} />
@@ -134,26 +106,44 @@ export default function SeekerForm() {
 
           {/* Header */}
           <View style={styles.header}>
-            <Text style={styles.kicker}>BUSCO TRABAJO</Text>
-            <Text style={styles.title}>Tu oficio</Text>
+            <Text style={styles.kicker}>NECESITO UN TRABAJADOR</Text>
+            <Text style={styles.title}>Busca perfiles cerca</Text>
             <Text style={styles.sub}>
-              Completa tu perfil de trabajador. Tu nombre y zona ya están guardados.
+              Aquí no se publican ofertas. Solo buscas perfiles y los contactas directo.
             </Text>
           </View>
 
           {/* Card */}
           <View style={[styles.card, { maxWidth: MAX_W }]}>
-            <Text style={styles.label}>¿Qué oficio haces?</Text>
-
+            <Text style={styles.label}>¿Qué necesitas?</Text>
             <View style={styles.inputWrap}>
               <View style={styles.inputIcon}>
-                <Ionicons name="construct-outline" size={18} color={ORANGE} />
+                <Ionicons name="search-outline" size={18} color={ORANGE} />
               </View>
-
               <TextInput
-                value={trade}
-                onChangeText={setTrade}
+                value={need}
+                onChangeText={setNeed}
                 placeholder="Ej: Albañil, electricista, niñera…"
+                placeholderTextColor="#9AA7BD"
+                style={styles.input}
+                autoCapitalize="sentences"
+                returnKeyType="next"
+              />
+            </View>
+
+            <Text style={styles.helper}>Escribe el oficio que buscas. Ej: “Albañil”.</Text>
+
+            <View style={{ height: 12 }} />
+
+            <Text style={styles.label}>Zona / lugar</Text>
+            <View style={styles.inputWrap}>
+              <View style={styles.inputIcon}>
+                <Ionicons name="location-outline" size={18} color={ORANGE} />
+              </View>
+              <TextInput
+                value={zone}
+                onChangeText={setZone}
+                placeholder="Ej: San Lucas, Antigua, Zona 1…"
                 placeholderTextColor="#9AA7BD"
                 style={styles.input}
                 autoCapitalize="sentences"
@@ -161,46 +151,10 @@ export default function SeekerForm() {
               />
             </View>
 
-            <Text style={styles.helper}>
-              Escribe solo tu oficio. Ej: “Albañil” o “Electricista”.
-            </Text>
-
-            <View style={{ height: 14 }} />
-
-            <Text style={styles.sectionTitle}>Disponibilidad</Text>
-
-            <View style={styles.chipsRow}>
-              <Chip
-                label="Mañana"
-                active={availability.includes("manana")}
-                onPress={() => toggle("manana")}
-              />
-              <Chip
-                label="Tarde"
-                active={availability.includes("tarde")}
-                onPress={() => toggle("tarde")}
-              />
-              <Chip
-                label="Noche"
-                active={availability.includes("noche")}
-                onPress={() => toggle("noche")}
-              />
-              <Chip
-                label="Fin de semana"
-                active={availability.includes("fin")}
-                onPress={() => toggle("fin")}
-              />
-            </View>
-
-            <Text style={styles.hint}>
-              Seleccionado:{" "}
-              <Text style={styles.hintStrong}>{prettyAvail(availability)}</Text>
-            </Text>
-
             <View style={styles.note}>
-              <Ionicons name="shield-checkmark-outline" size={16} color={MUTED} />
+              <Ionicons name="chatbubbles-outline" size={16} color={MUTED} />
               <Text style={styles.noteTxt}>
-                No publicamos ofertas. Solo tu perfil para que te contacten directo.
+                Verás perfiles cercanos y podrás contactar directo por WhatsApp o llamada.
               </Text>
             </View>
           </View>
@@ -219,28 +173,13 @@ export default function SeekerForm() {
               <Text style={styles.primaryTxt}>{primaryLabel}</Text>
             </Pressable>
 
-            <Text style={styles.micro}>Podrás editar esto después.</Text>
+            <Text style={styles.micro}>Puedes cambiar esto después.</Text>
           </View>
 
           <View style={{ height: 16 }} />
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
-  );
-}
-
-function Chip({ label, active, onPress }: ChipProps) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.chip,
-        active && styles.chipActive,
-        pressed && { opacity: 0.9 },
-      ]}
-    >
-      <Text style={[styles.chipTxt, active && styles.chipTxtActive]}>{label}</Text>
-    </Pressable>
   );
 }
 
@@ -268,6 +207,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(11,18,32,0.08)",
   },
+
   backChipTxt: { fontFamily: "Poppins_500Medium", fontSize: 13, color: TEXT },
 
   header: { width: "100%", maxWidth: MAX_W, marginBottom: 12 },
@@ -281,19 +221,9 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
 
-  title: {
-    fontFamily: "Poppins_700Bold",
-    fontSize: 22,
-    color: TEXT,
-    marginBottom: 6,
-  },
+  title: { fontFamily: "Poppins_700Bold", fontSize: 22, color: TEXT, marginBottom: 6 },
 
-  sub: {
-    fontFamily: "Poppins_400Regular",
-    fontSize: 13,
-    lineHeight: 19,
-    color: MUTED,
-  },
+  sub: { fontFamily: "Poppins_400Regular", fontSize: 13, lineHeight: 19, color: MUTED },
 
   card: {
     width: "100%",
@@ -314,12 +244,7 @@ const styles = StyleSheet.create({
     }),
   },
 
-  label: {
-    fontFamily: "Poppins_500Medium",
-    fontSize: 12.5,
-    color: TEXT,
-    marginBottom: 6,
-  },
+  label: { fontFamily: "Poppins_500Medium", fontSize: 12.5, color: TEXT, marginBottom: 6 },
 
   inputWrap: {
     flexDirection: "row",
@@ -332,63 +257,11 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
 
-  inputIcon: {
-    width: 28,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 6,
-  },
+  inputIcon: { width: 28, alignItems: "center", justifyContent: "center", marginRight: 6 },
 
-  input: {
-    flex: 1,
-    fontFamily: "Poppins_400Regular",
-    fontSize: 13.5,
-    color: TEXT,
-    padding: 0,
-  },
+  input: { flex: 1, fontFamily: "Poppins_400Regular", fontSize: 13.5, color: TEXT, padding: 0 },
 
-  helper: {
-    marginTop: 8,
-    fontFamily: "Poppins_400Regular",
-    fontSize: 12,
-    color: "#7C879B",
-  },
-
-  sectionTitle: {
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: 13,
-    color: TEXT,
-    marginBottom: 8,
-  },
-
-  chipsRow: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-
-  chip: {
-    borderRadius: 999,
-    paddingVertical: 9,
-    paddingHorizontal: 12,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "rgba(11,18,32,0.10)",
-  },
-
-  chipActive: {
-    backgroundColor: "rgba(234,105,30,0.12)",
-    borderColor: "rgba(234,105,30,0.28)",
-  },
-
-  chipTxt: { fontFamily: "Poppins_500Medium", fontSize: 12.5, color: TEXT },
-
-  chipTxtActive: { color: TEXT },
-
-  hint: {
-    marginTop: 10,
-    fontFamily: "Poppins_400Regular",
-    fontSize: 12,
-    color: MUTED,
-  },
-
-  hintStrong: { fontFamily: "Poppins_600SemiBold", color: TEXT },
+  helper: { marginTop: 8, fontFamily: "Poppins_400Regular", fontSize: 12, color: "#7C879B" },
 
   note: {
     marginTop: 12,
@@ -403,39 +276,17 @@ const styles = StyleSheet.create({
     borderColor: "rgba(11,18,32,0.06)",
   },
 
-  noteTxt: {
-    flex: 1,
-    fontFamily: "Poppins_400Regular",
-    fontSize: 12,
-    color: MUTED,
-    lineHeight: 16,
-  },
+  noteTxt: { flex: 1, fontFamily: "Poppins_400Regular", fontSize: 12, color: MUTED, lineHeight: 16 },
 
   ctaWrap: { width: "100%", marginTop: 14, alignItems: "center" },
 
-  primaryBtn: {
-    width: "100%",
-    backgroundColor: ORANGE,
-    paddingVertical: 14,
-    borderRadius: 14,
-    alignItems: "center",
-  },
+  primaryBtn: { width: "100%", backgroundColor: ORANGE, paddingVertical: 14, borderRadius: 14, alignItems: "center" },
 
   primaryPressed: { opacity: 0.95, transform: [{ scale: 0.992 }] },
 
   primaryDisabled: { backgroundColor: "rgba(234,105,30,0.45)" },
 
-  primaryTxt: {
-    fontFamily: "Poppins_600SemiBold",
-    color: "#FFFFFF",
-    fontSize: 14.5,
-  },
+  primaryTxt: { fontFamily: "Poppins_600SemiBold", color: "#FFFFFF", fontSize: 14.5 },
 
-  micro: {
-    marginTop: 10,
-    fontFamily: "Poppins_400Regular",
-    fontSize: 11.5,
-    color: "#7C879B",
-    textAlign: "center",
-  },
+  micro: { marginTop: 10, fontFamily: "Poppins_400Regular", fontSize: 11.5, color: "#7C879B", textAlign: "center" },
 });

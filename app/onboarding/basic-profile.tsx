@@ -19,6 +19,15 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+// ✅ Storage PRO (v2)
+import { setAvailability, upsertBasic } from "../../storage/profileStorage";
+
+// ✅ Boot checkpoint
+import { setCheckpoint } from "../../storage/bootStorage";
+
+// ✅ PIN flags
+import { getBootFlags } from "../../storage/pinStorage";
+
 const { width } = Dimensions.get("window");
 
 const ORANGE = "#ea691e";
@@ -46,13 +55,12 @@ type FieldProps = {
   onFocus?: () => void;
 };
 
-// ✅ KEYS que tu HomeTab está leyendo
+// ✅ Legacy KEYS
 const KEY_BASIC = "basic-profile";
 const KEY_AVAILABLE = "worker_available";
 
 export default function BasicProfile() {
   const router = useRouter();
-
   const scrollRef = useRef<ScrollView>(null);
 
   const [firstName, setFirstName] = useState<string>("");
@@ -94,49 +102,65 @@ export default function BasicProfile() {
       return;
     }
 
+    const createdAt = new Date().toISOString();
+
     const payload = {
       firstName: firstName.trim(),
       lastName: lastName.trim(),
       username: normalizeUsername(username.trim()),
       password,
       verifiedPhone: false,
-      createdAt: new Date().toISOString(),
+      createdAt,
     };
-
-    console.log("[create-account]", payload);
 
     try {
       // ✅ 1) Marcar sesión iniciada
       await AsyncStorage.setItem("chamba_session", "1");
 
-      // ✅ 2) Marcar onboarding completo (para que ya no mande a login)
+      // ✅ 2) Marcar onboarding completo
       await AsyncStorage.setItem("chamba_onboarded", "1");
 
       // ✅ 3) Guardar usuario (local por ahora)
       await AsyncStorage.setItem("chamba_user", JSON.stringify(payload));
 
-      // ✅ 4) Guardar PERFIL BÁSICO en el key que el Home lee
-      // (zona/whatsapp quedan vacíos por ahora, se completan después)
+      // ✅ 4) PERFIL PRO (v2): guardar básico
+      await upsertBasic({
+        firstName: payload.firstName,
+        lastName: payload.lastName,
+      });
+
+      // ✅ 5) Default: Mostrarme ON
+      await setAvailability(true);
+
+      // ✅ 6) Legacy
       await AsyncStorage.setItem(
         KEY_BASIC,
         JSON.stringify({
           firstName: payload.firstName,
           lastName: payload.lastName,
-          zone: "", // luego lo llenamos
-          whatsapp: "", // luego lo llenamos
+          zone: "",
+          whatsapp: "",
           createdAt: payload.createdAt,
         })
       );
 
-      // ✅ 5) Mostrarme ON por defecto (para que el switch tenga valor consistente)
-      // (si querés que por defecto sea OFF, poné "0")
       const prevAv = await AsyncStorage.getItem(KEY_AVAILABLE);
       if (prevAv === null) {
         await AsyncStorage.setItem(KEY_AVAILABLE, "1");
       }
 
-      // ✅ 6) Continuar onboarding: elegir rol
-      router.push("/onboarding/role");
+      // ✅ 7) checkpoint: cuenta creada
+      await setCheckpoint("basic_done");
+
+      // ✅ 8) Ir a PIN si no está activo
+      const boot = await getBootFlags();
+      if (!boot.pinEnabled) {
+        router.replace("/onboarding/pin-suggest");
+        return;
+      }
+
+      // ✅ Si ya tiene PIN por alguna razón, ir a ROLE (NO a worker-form)
+      router.replace("/onboarding/role");
     } catch (e) {
       console.log("[create-account-error]", e);
       Alert.alert("Error", "No se pudo crear la cuenta. Intenta de nuevo.");
@@ -170,17 +194,14 @@ export default function BasicProfile() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* Header */}
           <View style={styles.header}>
             <Text style={styles.kicker}>CREAR CUENTA</Text>
             <Text style={styles.title}>Datos de tu cuenta</Text>
             <Text style={styles.sub}>
-              Crea tu cuenta en segundos. Luego podrás verificar tu número desde el Home para
-              aparecer en la app.
+              Crea tu cuenta en segundos. Luego podrás completar tu perfil para aparecer en la app.
             </Text>
           </View>
 
-          {/* Card */}
           <View style={[styles.card, { maxWidth: MAX_W }]}>
             <Field
               label="Nombre"
@@ -264,13 +285,11 @@ export default function BasicProfile() {
             <View style={styles.note}>
               <Ionicons name="shield-checkmark-outline" size={16} color={MUTED} />
               <Text style={styles.noteTxt}>
-                Tu cuenta se crea ahora. Para aparecer en la app, luego verificas tu número desde
-                el Home.
+                Podrás completar tu zona y WhatsApp en el siguiente paso según tu rol.
               </Text>
             </View>
           </View>
 
-          {/* CTA */}
           <View style={[styles.ctaWrap, { maxWidth: MAX_W }]}>
             <Pressable
               onPress={onSubmit}
