@@ -20,7 +20,11 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { DEPARTMENTS, getMunicipalities, Option } from "../../data/gtLocations";
 import { setCheckpoint } from "../../storage/bootStorage";
-import { upsertBasic, upsertWorker } from "../../storage/profileStorage";
+import {
+  setProfileCompleted,
+  upsertBasic,
+  upsertWorker,
+} from "../../storage/profileStorage";
 
 const { width } = Dimensions.get("window");
 const MAX_W = Math.min(420, width - 44);
@@ -115,10 +119,12 @@ function PickerModal({
 export default function WorkerForm() {
   const router = useRouter();
 
-  // ✅ ahora “zona” lo usamos como sector/colonia (opcional)
-  const [zone, setZone] = useState("");
+  // ✅ sector/colonia (opcional)
+  const [sector, setSector] = useState("");
 
+  // ✅ WhatsApp (por ahora opcional; luego lo vuelves obligatorio cuando verifiques)
   const [whatsapp, setWhatsapp] = useState("");
+
   const [work, setWork] = useState("");
   const [availability, setAvailability] = useState<AvKey[]>([]);
   const [saving, setSaving] = useState(false);
@@ -136,14 +142,10 @@ export default function WorkerForm() {
   }, [dept?.id]);
 
   const canSave = useMemo(() => {
-    return (
-      !!dept &&
-      !!muni &&
-      whatsapp.trim().length >= 6 &&
-      work.trim().length >= 2 &&
-      !saving
-    );
-  }, [dept, muni, whatsapp, work, saving]);
+    // ✅ Solo obligamos depto/muni + oficio.
+    // WhatsApp lo dejamos opcional por ahora.
+    return !!dept && !!muni && work.trim().length >= 2 && !saving;
+  }, [dept, muni, work, saving]);
 
   const toggle = (k: AvKey) => {
     setAvailability((prev) => (prev.includes(k) ? prev.filter((x) => x !== k) : [...prev, k]));
@@ -151,7 +153,15 @@ export default function WorkerForm() {
 
   const onSave = async () => {
     if (!canSave) {
-      Alert.alert("Revisa tus datos", "Completa departamento, municipio, WhatsApp y tu oficio.");
+      Alert.alert("Revisa tus datos", "Completa departamento, municipio y tu oficio.");
+      return;
+    }
+
+    const wa = whatsapp.replace(/[^\d]/g, "").trim();
+
+    // ✅ Si ponen WhatsApp, mínimo 8 dígitos (GT usual), si no ponen, no pasa nada
+    if (wa.length > 0 && wa.length < 8) {
+      Alert.alert("WhatsApp inválido", "Si lo ingresas, escribe al menos 8 dígitos (solo números).");
       return;
     }
 
@@ -159,17 +169,20 @@ export default function WorkerForm() {
       setSaving(true);
 
       await upsertBasic({
-        // ✅ nuevo
+        // ✅ nuevos
         departmentId: dept!.id,
         departmentName: dept!.name,
         municipalityId: muni!.id,
         municipalityName: muni!.name,
 
-        // ✅ opcional (sector/colonia)
-        zone: zone.trim(),
+        // ✅ correcto: sector va en `sector`
+        sector: sector.trim(),
 
-        // ✅ whatsapp
-        whatsapp: whatsapp.trim(),
+        // ✅ legacy compat: copiamos sector también a `zone` para pantallas viejas
+        zone: sector.trim(),
+
+        // ✅ whatsapp opcional
+        whatsapp: wa,
       });
 
       await upsertWorker({
@@ -178,7 +191,11 @@ export default function WorkerForm() {
         isAvailable: true,
       });
 
+      // ✅ checkpoint (tu sistema)
       await setCheckpoint("worker_done");
+
+      // ✅ CLAVE: marcar perfil completado para que al reiniciar no vuelva al form
+      await setProfileCompleted(true);
 
       router.replace("/(tabs)");
     } catch (e) {
@@ -262,7 +279,7 @@ export default function WorkerForm() {
                 if (municipalities.length === 0) {
                   Alert.alert(
                     "Municipios no cargados",
-                    "Aún no están cargados los municipios de este departamento. Por ahora usa Sacatepéquez (piloto) o agrega el listado en gtLocations.ts."
+                    "Aún no están cargados los municipios de este departamento. Agrega el listado en gtLocations.ts."
                   );
                   return;
                 }
@@ -290,15 +307,15 @@ export default function WorkerForm() {
                 <Ionicons name="pin-outline" size={18} color={ORANGE} />
               </View>
               <TextInput
-                value={zone}
-                onChangeText={setZone}
+                value={sector}
+                onChangeText={setSector}
                 placeholder="Ej: Choacorral, El Manzanal, Los Aposentos…"
                 placeholderTextColor="#9AA7BD"
                 style={styles.input}
               />
             </View>
 
-            <Text style={[styles.label, { marginTop: 12 }]}>WhatsApp</Text>
+            <Text style={[styles.label, { marginTop: 12 }]}>WhatsApp (opcional)</Text>
             <View style={styles.inputWrap}>
               <View style={styles.inputIcon}>
                 <Ionicons name="call-outline" size={18} color={ORANGE} />
@@ -429,7 +446,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "rgba سد(11,18,32,0.10)".replace("سد", ""), // deja igual el color final
+    borderColor: "rgba(11,18,32,0.10)",
     borderRadius: 14,
     paddingHorizontal: 10,
     paddingVertical: 10,

@@ -4,46 +4,56 @@ import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
 import {
-    Alert,
-    Dimensions,
-    Modal,
-    Pressable,
-    StyleSheet,
-    Text,
-    TextInput,
-    View
+  Alert,
+  Dimensions,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
-    checkCurrentPin,
-    disablePin,
-    getBootFlags,
-    PIN_LENGTH,
+  checkCurrentPin,
+  disablePin,
+  getBootFlags,
+  PIN_LENGTH,
 } from "../../storage/pinStorage";
 
-const { width } = Dimensions.get("window");
-const MAX_W = Math.min(480, width - 36);
+import { getProfile, switchRole, type Role } from "../../storage/profileStorage";
 
-const BG = "#FFFFFF";
-const CARD = "#F7F8FC";
+const { width } = Dimensions.get("window");
+const MAX_W = Math.min(420, width - 36);
+
+// ✅ Estilo igual a Home/Profile
+const BG = "#F6F8FC";
+const CARD = "#FFFFFF";
 const BORDER = "#E7ECF5";
 const TEXT = "#0B1220";
 const MUTED = "#4F5D73";
-const ACC = "#2f49c6";
+
+const BLUE = "#2f49c6";
 const ORANGE = "#ea691e";
+const GREEN = "#16a34a";
 const DANGER = "#e53935";
 
 type GateMode = null | "change" | "disable";
 
 export default function SettingsScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   const [pinEnabled, setPinEnabled] = useState(false);
   const [locked, setLocked] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // gate modal
+  // ✅ Rol (worker / seeker)
+  const [role, setRole] = useState<Role>("worker");
+
+  // gate modal (confirmar PIN)
   const [gateMode, setGateMode] = useState<GateMode>(null);
   const [gatePin, setGatePin] = useState("");
   const [gateErr, setGateErr] = useState("");
@@ -52,9 +62,13 @@ export default function SettingsScreen() {
   const load = useCallback(async () => {
     try {
       setLoading(true);
+
       const boot = await getBootFlags();
-      setPinEnabled(boot.pinEnabled);
-      setLocked(boot.locked);
+      setPinEnabled(!!boot.pinEnabled);
+      setLocked(!!boot.locked);
+
+      const p = await getProfile();
+      setRole(p?.role === "seeker" ? "seeker" : "worker");
     } finally {
       setLoading(false);
     }
@@ -66,11 +80,32 @@ export default function SettingsScreen() {
     }, [load])
   );
 
-  const statusText = useMemo(() => {
-    if (loading) return "Cargando…";
-    if (!pinEnabled) return "Desactivado";
-    return locked ? "Activado (bloqueado)" : "Activado";
+  const pinStatus = useMemo(() => {
+    if (loading) return { txt: "Cargando…", tone: "neutral" as const };
+    if (!pinEnabled) return { txt: "Desactivado", tone: "off" as const };
+    if (locked) return { txt: "Activado (bloqueado)", tone: "warn" as const };
+    return { txt: "Activado", tone: "on" as const };
   }, [loading, pinEnabled, locked]);
+
+  const roleStatus = useMemo(() => {
+    return role === "worker"
+      ? {
+          txt: "Busco trabajo",
+          sub: "Soy trabajador y ofrezco mis servicios.",
+          icon: "briefcase-outline" as const,
+          color: BLUE,
+          bg: "rgba(47,73,198,0.10)",
+          bd: "rgba(47,73,198,0.18)",
+        }
+      : {
+          txt: "Busco trabajador",
+          sub: "Quiero encontrar personas que me ayuden.",
+          icon: "search-outline" as const,
+          color: ORANGE,
+          bg: "rgba(234,105,30,0.10)",
+          bd: "rgba(234,105,30,0.18)",
+        };
+  }, [role]);
 
   const openGate = (mode: Exclude<GateMode, null>) => {
     setGateMode(mode);
@@ -86,8 +121,25 @@ export default function SettingsScreen() {
     setGateBusy(false);
   };
 
-  const onEnable = () => {
+  const onEnablePin = () => {
     router.push("/onboarding/set-pin");
+  };
+
+  const onPinRowPress = () => {
+    if (!pinEnabled) {
+      onEnablePin();
+      return;
+    }
+
+    Alert.alert("PIN de ingreso", "¿Qué deseas hacer?", [
+      { text: "Cancelar", style: "cancel" },
+      { text: "Cambiar PIN", onPress: () => openGate("change") },
+      {
+        text: "Desactivar PIN",
+        style: "destructive",
+        onPress: () => openGate("disable"),
+      },
+    ]);
   };
 
   const onConfirmGate = async () => {
@@ -136,84 +188,233 @@ export default function SettingsScreen() {
     setGateBusy(false);
   };
 
-  return (
-    <SafeAreaView style={styles.safe}>
-      {/* ✅ Contenedor centrado vertical */}
-      <View style={styles.centerStage}>
-        <View style={styles.block}>
-          <View style={styles.top}>
-            <Text style={styles.title}>Ajustes</Text>
-            <Text style={styles.sub}>Configura tu seguridad y preferencias.</Text>
+  const onChangeRole = useCallback(
+    (nextRole: Role) => {
+      if (nextRole === role) return;
+
+      const title = "Cambiar tipo de cuenta";
+      const msg =
+        nextRole === "worker"
+          ? "Pasarás a “Busco trabajo”. Podrás mostrar tus oficios, fotos y recibir chats."
+          : "Pasarás a “Busco trabajador”. Solo buscarás personas, y se ocultarán oficios/fotos/contactos.";
+
+      Alert.alert(title, msg, [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Cambiar",
+          onPress: async () => {
+            try {
+              await switchRole(nextRole);
+              setRole(nextRole);
+
+              // ✅ FIX: index.tsx se navega como "/(tabs)" (NO "/(tabs)/index")
+              router.replace("/(tabs)");
+            } catch (e) {
+              console.log("switchRole-error", e);
+              Alert.alert("Error", "No se pudo cambiar el tipo de cuenta.");
+            }
+          },
+        },
+      ]);
+    },
+    [role, router]
+  );
+
+  const Row = useCallback(
+    ({
+      icon,
+      iconBg,
+      iconBd,
+      iconColor,
+      title,
+      desc,
+      right,
+      onPress,
+      disabled,
+    }: {
+      icon: any;
+      iconBg: string;
+      iconBd: string;
+      iconColor: string;
+      title: string;
+      desc?: string;
+      right?: React.ReactNode;
+      onPress?: () => void;
+      disabled?: boolean;
+    }) => {
+      return (
+        <Pressable
+          onPress={onPress}
+          disabled={disabled}
+          style={({ pressed }) => [
+            styles.row,
+            pressed && !disabled && { opacity: 0.92 },
+            disabled && { opacity: 0.6 },
+          ]}
+        >
+          <View style={[styles.rowIcon, { backgroundColor: iconBg, borderColor: iconBd }]}>
+            <Ionicons name={icon} size={18} color={iconColor} />
           </View>
 
-          <View style={[styles.card, { maxWidth: MAX_W }]}>
-            <View style={styles.rowTop}>
-              <View style={styles.rowLeft}>
-                <View style={styles.iconBubble}>
-                  <Ionicons name="lock-closed-outline" size={18} color={ORANGE} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.rowTitle}>PIN de ingreso</Text>
-                  <Text style={styles.rowDesc}>Protege tu cuenta al abrir la app.</Text>
-                </View>
-              </View>
-
-              <Text style={styles.badge}>{statusText}</Text>
-            </View>
-
-            {!pinEnabled ? (
-              <Pressable
-                onPress={onEnable}
-                style={({ pressed }) => [styles.primaryBtn, pressed && { opacity: 0.9 }]}
-              >
-                <Ionicons name="key-outline" size={16} color="#fff" />
-                <Text style={styles.primaryTxt}>Activar PIN</Text>
-              </Pressable>
-            ) : (
-              <View style={styles.actions}>
-                <Pressable
-                  onPress={() => openGate("change")}
-                  style={({ pressed }) => [styles.secondaryBtn, pressed && { opacity: 0.9 }]}
-                >
-                  <Ionicons name="refresh-outline" size={16} color={TEXT} />
-                  <Text style={styles.secondaryTxt}>Cambiar PIN</Text>
-                </Pressable>
-
-                <Pressable
-                  onPress={() => openGate("disable")}
-                  style={({ pressed }) => [styles.dangerBtn, pressed && { opacity: 0.9 }]}
-                >
-                  <Ionicons name="close-circle-outline" size={16} color="#fff" />
-                  <Text style={styles.dangerTxt}>Desactivar</Text>
-                </Pressable>
-              </View>
-            )}
-
-            <View style={styles.note}>
-              <Ionicons name="information-circle-outline" size={16} color={MUTED} />
-              <Text style={styles.noteTxt}>
-                Cuando el PIN está activado, se solicitará al abrir la app y al regresar desde segundo plano.
-              </Text>
-            </View>
-
-            <View style={styles.futureBox}>
-              <Text style={styles.futureTitle}>Próximamente</Text>
-              <Text style={styles.futureTxt}>
-                Recuperación por código SMS (número de teléfono verificado).
-              </Text>
-            </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.rowTitle}>{title}</Text>
+            {!!desc && <Text style={styles.rowDesc}>{desc}</Text>}
           </View>
-        </View>
+
+          {right ?? <Ionicons name="chevron-forward" size={18} color="#9AA7BD" />}
+        </Pressable>
+      );
+    },
+    []
+  );
+
+  const Badge = useMemo(() => {
+    const bg =
+      pinStatus.tone === "on"
+        ? "rgba(22,163,74,0.10)"
+        : pinStatus.tone === "warn"
+        ? "rgba(234,105,30,0.10)"
+        : pinStatus.tone === "off"
+        ? "rgba(229,57,53,0.08)"
+        : "rgba(11,18,32,0.06)";
+
+    const bd =
+      pinStatus.tone === "on"
+        ? "rgba(22,163,74,0.18)"
+        : pinStatus.tone === "warn"
+        ? "rgba(234,105,30,0.18)"
+        : pinStatus.tone === "off"
+        ? "rgba(229,57,53,0.14)"
+        : "rgba(11,18,32,0.10)";
+
+    const fg =
+      pinStatus.tone === "on"
+        ? GREEN
+        : pinStatus.tone === "warn"
+        ? ORANGE
+        : pinStatus.tone === "off"
+        ? DANGER
+        : MUTED;
+
+    return (
+      <View style={[styles.badge, { backgroundColor: bg, borderColor: bd }]}>
+        <Text style={[styles.badgeTxt, { color: fg }]} numberOfLines={1}>
+          {pinStatus.txt}
+        </Text>
       </View>
+    );
+  }, [pinStatus]);
+
+  const RoleBadge = useMemo(() => {
+    return (
+      <View style={[styles.badge, { backgroundColor: roleStatus.bg, borderColor: roleStatus.bd }]}>
+        <Text style={[styles.badgeTxt, { color: roleStatus.color }]} numberOfLines={1}>
+          {roleStatus.txt}
+        </Text>
+      </View>
+    );
+  }, [roleStatus]);
+
+  return (
+    <SafeAreaView style={[styles.safe, { paddingTop: Math.max(0, insets.top) }]}>
+      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+        <View style={[styles.wrap, { maxWidth: MAX_W }]}>
+          <View style={styles.header}>
+            <Text style={styles.h1}>Ajustes</Text>
+            <Text style={styles.sub}>Tu cuenta, seguridad y preferencias.</Text>
+          </View>
+
+          <View style={styles.card}>
+            <Text style={styles.section}>Cuenta</Text>
+
+            <Row
+              icon="person-outline"
+              iconBg="rgba(124,58,237,0.12)"
+              iconBd="rgba(124,58,237,0.18)"
+              iconColor="#7c3aed"
+              title="Editar perfil"
+              desc="Tu nombre, foto y ubicación."
+              onPress={() => router.push("/(tabs)/profile")}
+            />
+
+            <Row
+              icon={roleStatus.icon}
+              iconBg={roleStatus.bg}
+              iconBd={roleStatus.bd}
+              iconColor={roleStatus.color}
+              title="Tipo de cuenta"
+              desc={roleStatus.sub}
+              right={RoleBadge}
+              onPress={() => {
+                Alert.alert("Tipo de cuenta", "Elige una opción:", [
+                  { text: "Cancelar", style: "cancel" },
+                  { text: "Busco trabajo", onPress: () => onChangeRole("worker") },
+                  { text: "Busco trabajador", onPress: () => onChangeRole("seeker") },
+                ]);
+              }}
+            />
+
+            <View style={styles.sep} />
+
+            <Text style={[styles.section, { marginTop: 2 }]}>Seguridad</Text>
+
+            <Row
+              icon="lock-closed-outline"
+              iconBg="rgba(234,105,30,0.12)"
+              iconBd="rgba(234,105,30,0.20)"
+              iconColor={ORANGE}
+              title="PIN de ingreso"
+              desc="Protege tu cuenta al abrir la app."
+              right={Badge}
+              onPress={onPinRowPress}
+              disabled={loading}
+            />
+
+            <View style={styles.sep} />
+
+            <Text style={[styles.section, { marginTop: 2 }]}>Preferencias</Text>
+
+            <Row
+              icon="notifications-outline"
+              iconBg="rgba(2,132,199,0.12)"
+              iconBd="rgba(2,132,199,0.18)"
+              iconColor="#0284c7"
+              title="Notificaciones"
+              desc="Avisos y recordatorios."
+              onPress={() => Alert.alert("Próximamente", "Aquí configuraremos notificaciones.")}
+            />
+
+            <Row
+              icon="shield-checkmark-outline"
+              iconBg="rgba(47,73,198,0.12)"
+              iconBd="rgba(47,73,198,0.18)"
+              iconColor={BLUE}
+              title="Privacidad"
+              desc="Visibilidad y datos."
+              onPress={() => Alert.alert("Próximamente", "Aquí configuraremos privacidad.")}
+            />
+
+            <Row
+              icon="help-circle-outline"
+              iconBg="rgba(11,18,32,0.05)"
+              iconBd="rgba(11,18,32,0.08)"
+              iconColor={MUTED}
+              title="Ayuda"
+              desc="Soporte y preguntas frecuentes."
+              onPress={() => Alert.alert("Ayuda", "Próximamente agregaremos soporte.")}
+            />
+          </View>
+
+          <View style={{ height: 18 }} />
+        </View>
+      </ScrollView>
 
       {/* ====== MODAL: pedir PIN actual ====== */}
       <Modal visible={gateMode !== null} transparent animationType="fade">
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Confirmar PIN</Text>
-            <Text style={styles.modalSub}>
-              Ingresa tu PIN actual ({PIN_LENGTH} dígitos) para continuar.
-            </Text>
+            <Text style={styles.modalSub}>Ingresa tu PIN actual ({PIN_LENGTH} dígitos) para continuar.</Text>
 
             <View style={styles.modalInputWrap}>
               <Ionicons name="lock-closed-outline" size={18} color={ORANGE} />
@@ -239,7 +440,11 @@ export default function SettingsScreen() {
             <View style={styles.modalActions}>
               <Pressable
                 onPress={closeGate}
-                style={({ pressed }) => [styles.modalBtnGhost, pressed && { opacity: 0.9 }]}
+                style={({ pressed }) => [
+                  styles.modalBtnGhost,
+                  pressed && { opacity: 0.9 },
+                  gateBusy && { opacity: 0.7 },
+                ]}
                 disabled={gateBusy}
               >
                 <Text style={styles.modalBtnGhostTxt}>Cancelar</Text>
@@ -254,9 +459,7 @@ export default function SettingsScreen() {
                 ]}
                 disabled={gateBusy}
               >
-                <Text style={styles.modalBtnPrimaryTxt}>
-                  {gateBusy ? "Verificando…" : "Continuar"}
-                </Text>
+                <Text style={styles.modalBtnPrimaryTxt}>{gateBusy ? "Verificando…" : "Continuar"}</Text>
               </Pressable>
             </View>
 
@@ -271,150 +474,82 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: BG },
 
-  // ✅ Esto centra verticalmente la sección en la pantalla
-  centerStage: {
-    flex: 1,
+  container: {
     paddingHorizontal: 18,
-    justifyContent: "center",
+    paddingTop: 14,
+    paddingBottom: 16,
     alignItems: "center",
   },
+  wrap: { width: "100%" },
 
-  // ✅ “Block” limita ancho y mantiene todo alineado como tu diseño
-  block: {
-    width: "100%",
-    maxWidth: MAX_W,
-  },
-
-  top: { width: "100%", marginBottom: 14 },
-  title: {
-    fontFamily: "Poppins_700Bold",
-    fontSize: 22,
-    color: TEXT,
-    marginBottom: 4,
-  },
+  header: { marginBottom: 12 },
+  h1: { fontFamily: "Poppins_700Bold", fontSize: 20, color: TEXT },
   sub: {
+    marginTop: 4,
     fontFamily: "Poppins_400Regular",
-    fontSize: 13,
+    fontSize: 12.5,
     color: MUTED,
+    lineHeight: 16,
   },
 
   card: {
-    width: "100%",
     backgroundColor: CARD,
     borderWidth: 1,
     borderColor: BORDER,
     borderRadius: 18,
     padding: 14,
   },
-  rowTop: { gap: 10 },
-  rowLeft: { flexDirection: "row", gap: 10, alignItems: "center" },
-  iconBubble: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    backgroundColor: "rgba(234,105,30,0.12)",
+
+  section: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 12,
+    color: "#7C879B",
+    letterSpacing: 0.9,
+    textTransform: "uppercase",
+    marginBottom: 10,
+  },
+
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    borderRadius: 16,
+    backgroundColor: "rgba(11,18,32,0.02)",
+    borderWidth: 1,
+    borderColor: "rgba(11,18,32,0.06)",
+    marginBottom: 10,
+  },
+
+  rowIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "rgba(234,105,30,0.20)",
   },
-  rowTitle: { fontFamily: "Poppins_600SemiBold", fontSize: 14, color: TEXT },
-  rowDesc: { fontFamily: "Poppins_400Regular", fontSize: 12, color: MUTED },
+
+  rowTitle: { fontFamily: "Poppins_700Bold", fontSize: 13.5, color: TEXT },
+  rowDesc: {
+    marginTop: 2,
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12.2,
+    color: MUTED,
+    lineHeight: 16,
+  },
+
+  sep: { height: 4 },
 
   badge: {
-    alignSelf: "flex-start",
-    marginTop: 8,
+    maxWidth: 170,
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 999,
-    backgroundColor: "rgba(47,73,198,0.10)",
     borderWidth: 1,
-    borderColor: "rgba(47,73,198,0.18)",
-    color: ACC,
-    fontFamily: "Poppins_500Medium",
-    fontSize: 12,
   },
-
-  primaryBtn: {
-    marginTop: 14,
-    backgroundColor: ACC,
-    borderRadius: 14,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    flexDirection: "row",
-    gap: 8,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  primaryTxt: { fontFamily: "Poppins_600SemiBold", fontSize: 13, color: "#fff" },
-
-  actions: { marginTop: 14, flexDirection: "row", gap: 10, flexWrap: "wrap" },
-  secondaryBtn: {
-    flexDirection: "row",
-    gap: 8,
-    alignItems: "center",
-    backgroundColor: "rgba(11,18,32,0.05)",
-    borderWidth: 1,
-    borderColor: "rgba(11,18,32,0.08)",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 14,
-  },
-  secondaryTxt: { fontFamily: "Poppins_500Medium", fontSize: 12.5, color: TEXT },
-
-  dangerBtn: {
-    flexDirection: "row",
-    gap: 8,
-    alignItems: "center",
-    backgroundColor: DANGER,
-    borderWidth: 1,
-    borderColor: "rgba(0,0,0,0.06)",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 14,
-  },
-  dangerTxt: { fontFamily: "Poppins_600SemiBold", fontSize: 12.5, color: "#fff" },
-
-  note: {
-    marginTop: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 14,
-    backgroundColor: "rgba(11,18,32,0.04)",
-    borderWidth: 1,
-    borderColor: "rgba(11,18,32,0.06)",
-  },
-  noteTxt: {
-    flex: 1,
-    fontFamily: "Poppins_400Regular",
-    fontSize: 12,
-    color: MUTED,
-    lineHeight: 16,
-  },
-
-  futureBox: {
-    marginTop: 12,
-    padding: 12,
-    borderRadius: 14,
-    backgroundColor: "rgba(234,105,30,0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(234,105,30,0.16)",
-  },
-  futureTitle: {
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: 12.5,
-    color: TEXT,
-    marginBottom: 4,
-  },
-  futureTxt: {
-    fontFamily: "Poppins_400Regular",
-    fontSize: 12,
-    color: MUTED,
-    lineHeight: 16,
-  },
+  badgeTxt: { fontFamily: "Poppins_600SemiBold", fontSize: 12 },
 
   // ===== modal =====
   modalBackdrop: {
@@ -446,16 +581,16 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    backgroundColor: CARD,
+    backgroundColor: "rgba(11,18,32,0.04)",
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: BORDER,
+    borderColor: "rgba(11,18,32,0.06)",
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
   modalInput: {
     flex: 1,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: "Poppins_500Medium",
     fontSize: 16,
     color: TEXT,
     letterSpacing: 10,
@@ -463,7 +598,7 @@ const styles = StyleSheet.create({
   },
   modalErr: {
     marginTop: 8,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: "Poppins_600SemiBold",
     fontSize: 12.5,
     color: DANGER,
   },
@@ -478,16 +613,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(11,18,32,0.08)",
   },
-  modalBtnGhostTxt: { fontFamily: "Poppins_600SemiBold", color: TEXT },
+  modalBtnGhostTxt: { fontFamily: "Poppins_700Bold", color: TEXT },
   modalBtnPrimary: {
     flex: 1,
     borderRadius: 14,
     paddingVertical: 12,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: ACC,
+    backgroundColor: BLUE,
   },
-  modalBtnPrimaryTxt: { fontFamily: "Poppins_600SemiBold", color: "#fff" },
+  modalBtnPrimaryTxt: { fontFamily: "Poppins_700Bold", color: "#fff" },
   modalHint: {
     marginTop: 10,
     fontFamily: "Poppins_400Regular",

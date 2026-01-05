@@ -12,7 +12,7 @@ const KEY_PIN_HASH = "chamba_pin_hash";
 
 // ✅ Para lock por tiempo
 const KEY_LAST_ACTIVE_AT = "chamba_last_active_at"; // ms timestamp
-const LOCK_AFTER_SECONDS = 60; // ⬅️ ajusta: 60s / 120s / 300s etc.
+const LOCK_AFTER_SECONDS = 60; // ajusta: 60s / 120s / 300s etc.
 
 const PIN_LEN = 6;
 
@@ -24,7 +24,7 @@ async function sha256(input: string) {
   return Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, input);
 }
 
-async function nowMs() {
+function nowMs() {
   return Date.now();
 }
 
@@ -40,6 +40,13 @@ export async function setAppLocked(v: boolean) {
   await AsyncStorage.setItem(KEY_APP_LOCKED, v ? "1" : "0");
 }
 
+/**
+ * ✅ Marca actividad "now" (útil al desbloquear)
+ */
+export async function touchActiveNow() {
+  await AsyncStorage.setItem(KEY_LAST_ACTIVE_AT, String(nowMs()));
+}
+
 export async function enablePin(pin: string) {
   if (!isValidPin(pin)) throw new Error("PIN inválido");
 
@@ -51,9 +58,7 @@ export async function enablePin(pin: string) {
 
   await AsyncStorage.setItem(KEY_PIN_ENABLED, "1");
   await setAppLocked(false);
-
-  // ✅ marca actividad
-  await AsyncStorage.setItem(KEY_LAST_ACTIVE_AT, String(await nowMs()));
+  await touchActiveNow();
 }
 
 export async function verifyPin(pin: string): Promise<boolean> {
@@ -65,6 +70,18 @@ export async function verifyPin(pin: string): Promise<boolean> {
 
   const hash = await sha256(`${salt}:${pin}`);
   return hash === storedHash;
+}
+
+/**
+ * ✅ Verifica y desbloquea (lo ideal para tu pantalla /pin)
+ */
+export async function verifyAndUnlock(pin: string): Promise<boolean> {
+  const ok = await verifyPin(pin);
+  if (!ok) return false;
+
+  await setAppLocked(false);
+  await touchActiveNow();
+  return true;
 }
 
 /**
@@ -86,23 +103,14 @@ export async function disablePin() {
   await AsyncStorage.removeItem(KEY_LAST_ACTIVE_AT);
 }
 
-/**
- * ✅ Llamar cuando la app pasa a background / se minimiza
- * (No bloquea de una vez: solo marca el tiempo)
- */
 export async function markBackgrounded() {
-  // solo si hay sesión + pin activo tiene sentido
   const boot = await getBootFlags();
   if (!boot.session) return;
   if (!boot.pinEnabled) return;
 
-  await AsyncStorage.setItem(KEY_LAST_ACTIVE_AT, String(await nowMs()));
+  await touchActiveNow();
 }
 
-/**
- * ✅ Llamar cuando la app vuelve a foreground
- * Si estuvo fuera más de LOCK_AFTER_SECONDS -> bloquear
- */
 export async function lockIfTimedOut() {
   const boot = await getBootFlags();
   if (!boot.session) return;
@@ -112,19 +120,15 @@ export async function lockIfTimedOut() {
   const last = raw ? Number(raw) : 0;
 
   // Si no hay timestamp, por seguridad lo tratamos como “timeout”
-  const elapsedMs = last > 0 ? (await nowMs()) - last : Number.MAX_SAFE_INTEGER;
+  const elapsedMs = last > 0 ? nowMs() - last : Number.MAX_SAFE_INTEGER;
 
   if (elapsedMs >= LOCK_AFTER_SECONDS * 1000) {
     await setAppLocked(true);
   }
 
-  // refresca marca de actividad
-  await AsyncStorage.setItem(KEY_LAST_ACTIVE_AT, String(await nowMs()));
+  await touchActiveNow();
 }
 
-/**
- * ✅ Bloqueo manual (por si querés forzar lock desde Settings)
- */
 export async function lockAppIfNeeded() {
   const boot = await getBootFlags();
   if (!boot.session) return;
@@ -146,7 +150,6 @@ export async function getBootFlags() {
     AsyncStorage.getItem(KEY_APP_LOCKED),
   ]);
 
-  // ✅ Si existe algo en session, lo consideramos sesión activa.
   const hasSession = !!session && session !== "0" && session !== "false";
 
   const flags = {
@@ -155,7 +158,6 @@ export async function getBootFlags() {
     locked: locked === "1",
   };
 
-  // 🔁 Alias opcional por compatibilidad si en algún lado usaste appLocked
   return { ...flags, appLocked: flags.locked };
 }
 

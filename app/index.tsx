@@ -11,10 +11,12 @@ import {
   View,
 } from "react-native";
 
-import { getCheckpoint, setCheckpoint } from "../storage/bootStorage";
-import { getBootFlags, setAppLocked } from "../storage/pinStorage";
+import { getCheckpoint } from "../storage/bootStorage";
+import { getBootFlags, lockIfTimedOut } from "../storage/pinStorage";
 import {
   getProfile,
+  getProfileCompleted,
+  isBasicComplete,
   isSeekerComplete,
   isWorkerComplete,
 } from "../storage/profileStorage";
@@ -27,27 +29,44 @@ const KEY_SESSION = "chamba_session";
 const KEY_PIN_RETURN_TO = "chamba_pin_return_to";
 
 function isTruthySession(raw: string | null) {
-  return !!raw && raw !== "0" && raw !== "false" && raw !== "null" && raw !== "undefined";
+  return (
+    !!raw &&
+    raw !== "0" &&
+    raw !== "false" &&
+    raw !== "null" &&
+    raw !== "undefined"
+  );
 }
 
-async function computeNextAfterAuth(): Promise<string> {
-  const [p, checkpoint] = await Promise.all([getProfile(), getCheckpoint()]);
+async function decideNextRoute(): Promise<string> {
+  const [p, completed, checkpoint] = await Promise.all([
+    getProfile(),
+    getProfileCompleted(),
+    getCheckpoint(),
+  ]);
 
-  // ✅ PRIMER FLUJO (la primera vez) manda:
-  // basic_done -> pin-suggest
-  // pin_done   -> role
+  // ✅ Si ya está completado, Tabs siempre gana
+  if (completed) return "/(tabs)";
+
+  // ✅ Si no hay perfil o basic incompleto -> basic-profile
+  if (!p || !isBasicComplete(p)) return "/onboarding/basic-profile";
+
+  // ✅ Si el checkpoint está en basic_done, toca sugerir pin (si aún no)
+  // (El PIN real se decide por pinEnabled + lock)
   if (checkpoint === "basic_done") return "/onboarding/pin-suggest";
-  if (checkpoint === "pin_done") return "/onboarding/role";
 
-  // ✅ Si ya eligió rol y está completado -> tabs
-  if (p?.role === "worker") {
+  // ✅ Si no hay rol, toca elegir rol
+  if (!p.role) return "/onboarding/role";
+
+  // ✅ Si hay rol pero falta su form
+  if (p.role === "worker") {
     return isWorkerComplete(p) ? "/(tabs)" : "/onboarding/worker-form";
   }
-  if (p?.role === "seeker") {
+
+  if (p.role === "seeker") {
     return isSeekerComplete(p) ? "/(tabs)" : "/onboarding/seeker-form";
   }
 
-  // ✅ Sin role aún
   return "/onboarding/role";
 }
 
@@ -84,15 +103,14 @@ export default function SplashScreen() {
 
     const t = setTimeout(async () => {
       try {
-        const [onboarded, sessionRaw, boot, checkpoint] = await Promise.all([
+        const [onboarded, sessionRaw] = await Promise.all([
           AsyncStorage.getItem(KEY_ONBOARDED),
           AsyncStorage.getItem(KEY_SESSION),
-          getBootFlags(),
-          getCheckpoint(),
         ]);
 
         const hasSession = isTruthySession(sessionRaw);
 
+        // ✅ Sin sesión: onboarding o login
         if (!hasSession) {
           if (onboarded !== "1") {
             router.replace("/onboarding");
@@ -102,30 +120,29 @@ export default function SplashScreen() {
           return;
         }
 
+        // ✅ Con sesión: asegurar onboarded
         if (onboarded !== "1") {
           await AsyncStorage.setItem(KEY_ONBOARDED, "1");
         }
 
-        if (!checkpoint) {
-          await setCheckpoint("basic_done");
-        }
+        // ✅ 1) aplica regla timeout -> puede setear locked=true
+        await lockIfTimedOut();
 
-        let next = await computeNextAfterAuth();
+        // ✅ 2) leer flags ya con locked actualizado
+        const boot = await getBootFlags();
 
-        // ✅ Si dice pin-suggest pero ya tiene pin, entonces le toca ROLE
-        if (next === "/onboarding/pin-suggest" && boot.pinEnabled) {
-          next = "/onboarding/role";
-          await setCheckpoint("pin_done");
-        }
+        // ✅ 3) decidir ruta destino real (tabs / onboarding steps)
+        const next = await decideNextRoute();
 
-        if (boot.pinEnabled) {
+        // ✅ 4) si PIN activo y está locked -> /pin
+        if (boot.pinEnabled && boot.locked) {
           await AsyncStorage.setItem(KEY_PIN_RETURN_TO, next);
-          await setAppLocked(true);
           router.replace("/pin");
           return;
         }
 
-        router.replace("/onboarding/pin-suggest");
+        // ✅ 5) si no está locked -> entra directo
+        router.replace(next);
       } catch (e) {
         router.replace("/onboarding/login");
       }

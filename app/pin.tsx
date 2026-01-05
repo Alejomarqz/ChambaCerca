@@ -16,7 +16,11 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { logoutAndUnlock, PIN_LENGTH, setAppLocked, verifyPin } from "../storage/pinStorage";
+import {
+  logoutAndUnlock,
+  PIN_LENGTH,
+  verifyAndUnlock, // ✅ NUEVO (usa esto)
+} from "../storage/pinStorage";
 
 const { width } = Dimensions.get("window");
 
@@ -41,7 +45,10 @@ export default function PinScreen() {
   const [msg, setMsg] = useState<string>("");
   const [checking, setChecking] = useState(false);
 
-  const canSubmit = useMemo(() => new RegExp(`^\\d{${PIN_LENGTH}}$`).test(pin), [pin]);
+  const canSubmit = useMemo(
+    () => new RegExp(`^\\d{${PIN_LENGTH}}$`).test(pin),
+    [pin]
+  );
 
   const hardLogout = useCallback(async () => {
     await logoutAndUnlock();
@@ -53,7 +60,6 @@ export default function PinScreen() {
     const next = (await AsyncStorage.getItem(KEY_PIN_RETURN_TO)) || "/(tabs)";
     await AsyncStorage.removeItem(KEY_PIN_RETURN_TO);
 
-    await setAppLocked(false);
     router.replace(next);
   }, [router]);
 
@@ -63,7 +69,8 @@ export default function PinScreen() {
       setChecking(true);
       setMsg("");
 
-      const ok = await verifyPin(value);
+      // ✅ Una sola operación: verifica + desbloquea + refresca actividad
+      const ok = await verifyAndUnlock(value);
 
       if (ok) {
         await goAfterUnlock();
@@ -150,14 +157,19 @@ export default function PinScreen() {
             ) : (
               <Text style={styles.helper}>
                 Intentos restantes:{" "}
-                <Text style={styles.helperStrong}>{triesLeft}/{MAX_TRIES}</Text>
+                <Text style={styles.helperStrong}>
+                  {triesLeft}/{MAX_TRIES}
+                </Text>
               </Text>
             )}
 
             <View style={styles.row}>
               <Pressable
                 onPress={hardLogout}
-                style={({ pressed }) => [styles.linkBtn, pressed && { opacity: 0.85 }]}
+                style={({ pressed }) => [
+                  styles.linkBtn,
+                  pressed && { opacity: 0.85 },
+                ]}
                 disabled={checking}
               >
                 <Ionicons name="log-out-outline" size={16} color={TEXT} />
@@ -166,7 +178,11 @@ export default function PinScreen() {
             </View>
 
             <View style={styles.note}>
-              <Ionicons name="information-circle-outline" size={16} color={MUTED} />
+              <Ionicons
+                name="information-circle-outline"
+                size={16}
+                color={MUTED}
+              />
               <Text style={styles.noteTxt}>
                 Si olvidaste tu PIN, cierra sesión e inicia de nuevo.
               </Text>
@@ -174,7 +190,9 @@ export default function PinScreen() {
           </View>
 
           {tries >= MAX_TRIES ? (
-            <Text style={styles.lockedTxt}>Por seguridad se cerrará la sesión…</Text>
+            <Text style={styles.lockedTxt}>
+              Por seguridad se cerrará la sesión…
+            </Text>
           ) : null}
         </View>
       </KeyboardAvoidingView>
@@ -201,8 +219,18 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     textTransform: "uppercase",
   },
-  title: { fontFamily: "Poppins_700Bold", fontSize: 22, color: TEXT, marginBottom: 6 },
-  sub: { fontFamily: "Poppins_400Regular", fontSize: 13, lineHeight: 19, color: MUTED },
+  title: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 22,
+    color: TEXT,
+    marginBottom: 6,
+  },
+  sub: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 13,
+    lineHeight: 19,
+    color: MUTED,
+  },
 
   card: {
     width: "100%",
@@ -213,7 +241,12 @@ const styles = StyleSheet.create({
     padding: 14,
   },
 
-  label: { fontFamily: "Poppins_500Medium", fontSize: 12.5, color: TEXT, marginBottom: 6 },
+  label: {
+    fontFamily: "Poppins_500Medium",
+    fontSize: 12.5,
+    color: TEXT,
+    marginBottom: 6,
+  },
 
   inputWrap: {
     flexDirection: "row",
@@ -236,7 +269,12 @@ const styles = StyleSheet.create({
     letterSpacing: 10,
   },
 
-  helper: { marginTop: 10, fontFamily: "Poppins_400Regular", fontSize: 12, color: MUTED },
+  helper: {
+    marginTop: 10,
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    color: MUTED,
+  },
   helperStrong: { fontFamily: "Poppins_600SemiBold", color: TEXT },
 
   msgErr: {
@@ -272,7 +310,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(11,18,32,0.06)",
   },
-  noteTxt: { flex: 1, fontFamily: "Poppins_400Regular", fontSize: 12, color: MUTED, lineHeight: 16 },
+  noteTxt: {
+    flex: 1,
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    color: MUTED,
+    lineHeight: 16,
+  },
 
   lockedTxt: {
     marginTop: 14,
